@@ -1,3 +1,4 @@
 *.xlsx
 excels/
 main-m/config.py
+.gitignore
