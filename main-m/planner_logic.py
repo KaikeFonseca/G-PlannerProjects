@@ -16,31 +16,49 @@ def _build_tags(row):
 
 def _build_descricao(row):
     """Função auxiliar para construir a string de descrição para uma linha."""
+    # 1. Tratamento para Produção em Linha
     if row.get('prodEmLinha') == 1:
         return "PRODUÇÃO EM LINHA\n."
 
     tempo_prod = int(float(row.get("tempoProd", 0)))
-    desc_parts = [
-        f"INICIO: {row.get('horaProdInicial', '')}",
-        f"FIM: {row.get('horaProdFinal', '')}",
-        f"TEMPO/PRODUÇÃO: {tempo_prod} MIN.",
-        f"QTD. - {row.get('kanbans', 0)} K = {row.get('qtdPecasSeremProduzidas', 0)} PÇS"
-    ]
+    status_atual = row.get('STATUS')
+    
+    desc_parts = []
 
+    # 2. Diferenciação por STATUS
+    if status_atual == 3:
+        # Layout para itens críticos de outros PATANs
+        desc_parts.append(f"ITEM CRÍTICO - PATAN: {row.get('patan')}")
+        desc_parts.append("ESTADO: AGUARDANDO PUXADA")
+        desc_parts.append(f"TEMPO ESTIMADO: {tempo_prod} MIN.")
+    else:
+        # Layout normal para STATUS 2
+        desc_parts.append(f"INICIO: {row.get('horaProdInicial', '')}")
+        desc_parts.append(f"FIM: {row.get('horaProdFinal', '')}")
+        desc_parts.append(f"TEMPO/PRODUÇÃO: {tempo_prod} MIN.")
+
+    # 3. Informações de Quantidade (comum a ambos)
+    desc_parts.append(f"QTD. - {row.get('kanbans', 0)} K = {row.get('qtdPecasSeremProduzidas', 0)} PÇS")
+
+    # 4. Processamento de Componentes (sua lógica original mantida)
     comp_comb_str = str(row.get('compComb', ''))
     if pd.notna(row.get('compComb')) and comp_comb_str.lower() != 'nan':
         componentes = comp_comb_str.split('$$$$')
         for comp_info in componentes:
             comp_info = comp_info.strip()
-            if not comp_info: continue
+            if not comp_info: 
+                continue
             try:
                 comp_parts = comp_info.split('|')
                 comp_nome = comp_parts[0].strip()
+                # Mantendo sua lógica de pegar o índice 2 para quantidade
                 comp_qtd = int(float(comp_parts[2].strip()))
+                
                 tipo = "(ESTAMPADO)" if 'E' in comp_nome.upper() else "(VtoV)"
                 desc_parts.append(f"{tipo}: {comp_nome} - {comp_qtd} PÇS")
             except (ValueError, IndexError):
                 pass
+
     return "\n".join(desc_parts)
 
 def create_worksheet_planner_reformulated(df_input, linha_str):

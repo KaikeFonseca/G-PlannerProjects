@@ -4,13 +4,27 @@ from datetime import datetime, timedelta
 
 def montar_patan(letra_patan, linha, turno, excel_path):
     df_patan = pd.read_excel(excel_path)
+    linha_formatada = f"LINHA {linha}"
+    turno_int = int(turno)
 
-    # Filtros iniciais
-    df_filtered = df_patan[
+    # --- 1. FILTRO: PLANEJAMENTO ATUAL (STATUS 2) ---
+    df_normal = df_patan[
         (df_patan["patan"] == letra_patan) &
-        (df_patan["linha"] == f"LINHA {linha}") &
-        (df_patan["turno"] == int(turno))
+        (df_patan["linha"] == linha_formatada) &
+        (df_patan["turno"] == turno_int)
     ].copy()
+    df_normal["STATUS"] = 2
+
+    # --- 2. FILTRO: CRÍTICOS DE OUTROS PATANS (STATUS 3) ---
+    df_extra = df_patan[
+        (df_patan["linha"] == linha_formatada) & 
+        (df_patan["isCritico"] == True) & 
+        (df_patan["patan"] != letra_patan)
+    ].copy()
+    df_extra["STATUS"] = 3
+    
+    # Unifica as bases
+    df_filtered = pd.concat([df_normal, df_extra], ignore_index=True)
 
     df_diario_de_bordo = pd.DataFrame(columns=["Material", "DescricaoDiarioDeBordo", "QuantidadeFaltante"])
     df_com_erros = pd.DataFrame(columns=df_filtered.columns.tolist() + ["ErroDescricao"])
@@ -39,7 +53,7 @@ def montar_patan(letra_patan, linha, turno, excel_path):
         estoque_kanban_max = kanban_max*pcs_embalagem
         diff_estoque = total_livre - estoque_kanban_max
         obs = None
-        STATUS = 2
+        STATUS = row["STATUS"]
         qtd_caixas_atual = qtd_caixas_original
         info_comp_faltante = []
 
@@ -126,7 +140,8 @@ def montar_patan(letra_patan, linha, turno, excel_path):
         # Determinar a coluna de sequência
         sequencia_col = f'seq{letra_patan}'
         sequencia = row[sequencia_col] if pd.notna(row[sequencia_col]) else np.nan # Keep NaN for sorting
-        df_output_temp.append({
+        if row['STATUS'] == 3:
+            df_output_temp.append({
             'Material': material, 
             'posto': row['posto'], 
             'patan': row['patan'], 
@@ -137,8 +152,6 @@ def montar_patan(letra_patan, linha, turno, excel_path):
             'kanbans': kanbans,
             'tempPeca': row['tempPeca'], 
             'tempoProd': tempo_prod_atual, 
-            'sequencia': sequencia, 
-            'prodEmLinha': prod_em_linha,
             'compComb': ''.join(comp_comb_output),
             'estoqueMaterial': total_livre,
             'estoqueKanbanMax': estoque_kanban_max,
@@ -146,6 +159,27 @@ def montar_patan(letra_patan, linha, turno, excel_path):
             'obs': obs,
             'STATUS': STATUS
         })
+        else:
+            df_output_temp.append({
+                'Material': material, 
+                'posto': row['posto'], 
+                'patan': row['patan'], 
+                'linha': linha, 
+                'turno': row['turno'],
+                'qtdPecasSeremProduzidas': qtd_pecas_serem_produzidas,
+                'qtdPorKanban': pcs_embalagem, 
+                'kanbans': kanbans,
+                'tempPeca': row['tempPeca'], 
+                'tempoProd': tempo_prod_atual, 
+                'sequencia': sequencia, 
+                'prodEmLinha': prod_em_linha,
+                'compComb': ''.join(comp_comb_output),
+                'estoqueMaterial': total_livre,
+                'estoqueKanbanMax': estoque_kanban_max,
+                'diff': diff_estoque,
+                'obs': obs,
+                'STATUS': STATUS
+            })
     df_output = pd.DataFrame(df_output_temp)
 
     # Adicionar horaProdInicial, horaProdFinal e descricaoRefeicao
@@ -167,7 +201,11 @@ def montar_patan(letra_patan, linha, turno, excel_path):
 
         # Função para calcular os horários por grupo (posto)
         def calculate_times_for_group(group_df):
-            group_df = group_df.copy() # Work on a copy of the group to avoid SettingWithCopyWarning
+            group_df = group_df.copy()
+            
+            # Garantimos que os itens normais (2) venham antes dos críticos (3) para o cálculo
+            group_df = group_df.sort_values(by=["STATUS", "sequencia"])
+            
             turno_atual = group_df.iloc[0]["turno"]
             meal_times = {
                 1: datetime.strptime("11:00", "%H:%M").time(),
@@ -175,30 +213,53 @@ def montar_patan(letra_patan, linha, turno, excel_path):
                 3: datetime.strptime("03:00", "%H:%M").time()
             }
 
-            for i in range(len(group_df)):
-                tempo_prod_item = group_df.iloc[i]["tempoProd"]
-                sequencia_atual = group_df.iloc[i]["sequencia"]
+            # Variável para rastrear o término da última peça do planejamento real (Status 2)
+            last_end_time_dt = None
 
-                if sequencia_atual == 1: # First item in the sequence for this posto
+            for i in range(len(group_df)):
+                status_atual = group_df.iloc[i]["STATUS"]
+                idx = group_df.index[i]
+
+                # --- NOVA LÓGICA: SE FOR STATUS 3, NÃO CALCULA HORA ---
+                if status_atual == 3:
+                    group_df.loc[idx, "horaProdInicial"] = pd.NaT # Ou None
+                    group_df.loc[idx, "horaProdFinal"] = pd.NaT
+                    group_df.loc[idx, "descricaoRefeicao"] = "PEÇA CRÍTICA - AGUARDANDO PUXADA"
+                    continue # Pula para o próximo item sem afetar a linha do tempo
+
+                # --- LÓGICA PARA STATUS 2 (NORMAL) ---
+                tempo_prod_item = group_df.iloc[i]["tempoProd"]
+                
+                # Se for o primeiro item do Status 2
+                if last_end_time_dt is None:
                     current_time_dt = datetime.combine(datetime.today().date(), turn_start_times[turno_atual])
                 else:
-                    # Get horaProdFinal of the previous item in the group
-                    prev_hora_prod_final_time = group_df.iloc[i-1]["horaProdFinal"].time()
-                    current_time_dt = datetime.combine(datetime.today().date(), prev_hora_prod_final_time)
-                
-                # Handle meal time crossing for the current day
-                meal_datetime = datetime.combine(datetime.today().date(), meal_times[turno_atual])
-                if current_time_dt.time() > meal_datetime.time():
-                    meal_datetime += timedelta(days=1)
+                    current_time_dt = last_end_time_dt
 
-                # Check if the production time crosses the meal time
-                if current_time_dt < meal_datetime and \
-                    (current_time_dt + timedelta(minutes=tempo_prod_item)) > meal_datetime:
-                    current_time_dt += timedelta(minutes=40)
-                    group_df.loc[group_df.index[i], "descricaoRefeicao"] = "TEMPO DE REFEIÇÃO ADICIONADO AO CARTÃO"
+                # Lógica de Refeição
+                meal_datetime = datetime.combine(current_time_dt.date(), meal_times[turno_atual])
                 
-                group_df.loc[group_df.index[i], "horaProdInicial"] = current_time_dt
-                group_df.loc[group_df.index[i], "horaProdFinal"] = current_time_dt + timedelta(minutes=tempo_prod_item)
+                # Ajuste para virada de dia no horário de refeição
+                if current_time_dt.time() > meal_times[turno_atual]:
+                    if turno_atual == 3: # Terceiro turno costuma virar o dia
+                        # Se já passou da hora da refeição no início do turno, a próxima é amanhã
+                        meal_datetime += timedelta(days=1)
+
+                # Checa se a produção cruza o horário de almoço
+                if current_time_dt < meal_datetime and \
+                (current_time_dt + timedelta(minutes=tempo_prod_item)) > meal_datetime:
+                    current_time_dt += timedelta(minutes=40)
+                    group_df.loc[idx, "descricaoRefeicao"] = "TEMPO DE REFEIÇÃO ADICIONADO AO CARTÃO"
+
+                # Define os horários
+                start_time = current_time_dt
+                end_time = current_time_dt + timedelta(minutes=tempo_prod_item)
+                
+                group_df.loc[idx, "horaProdInicial"] = start_time
+                group_df.loc[idx, "horaProdFinal"] = end_time
+                
+                # Atualiza o rastreador para a próxima peça
+                last_end_time_dt = end_time
             
             return group_df            
         df_output = df_output.groupby("posto", group_keys=False).apply(calculate_times_for_group)

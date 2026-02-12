@@ -54,12 +54,16 @@ def main_loop():
         df_solicitacao, site_id, list_id_receive = sp_graph.receive_data_from_sharepoint_graph(config.PLANNER_RECEIVE_LIST_NAME)
         
         if not df_solicitacao.empty:
+            print(df_solicitacao.columns.tolist())
+            print(df_solicitacao)
+            print(df_solicitacao.shape)
             print("\nSolicitação recebida do SharePoint:")
             print(df_solicitacao.head().to_string())
             
             try:
                 # Carregue o DataFrame de um ficheiro de exemplo ou execute a lógica para gerá-lo
-                df_original = pd.read_excel("output_patan.xlsx") 
+                #df_original = pd.read_excel("output_patan.xlsx") 
+                df_original, df_diario, df_erros = montar_patan(df_solicitacao.at[0,'patan'], df_solicitacao.at[0,'linha'], df_solicitacao.at[0,'turno'], config.PATAN_FILE_PATH) 
 
                 df_planner_final = pl.create_worksheet_planner_reformulated(df_original, "1")
                 print("\nPlanner final gerado:")
