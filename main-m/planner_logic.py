@@ -69,6 +69,7 @@ def create_worksheet_planner_reformulated(df_input, linha_str):
     df = df_input.copy()
     
     today = datetime.today().date()
+    # Se for primeiro turno, o planejamento é considerado para o dia seguinte (ajuste conforme sua regra)
     if df['turno'].iloc[0] == 1:
         today += timedelta(days=1)
         
@@ -80,17 +81,37 @@ def create_worksheet_planner_reformulated(df_input, linha_str):
     lista_de_dfs = []
     data1_str = today.strftime("%d/%m")
     
-    df = df.sort_values(by=['posto', 'sequencia']).reset_index(drop=True)
+    # Ordenação inicial para garantir que o cálculo de sequência faça sentido
+    # Ordenamos por posto, depois por STATUS (para o 2 vir antes do 3) e então a sequência original
+    df = df.sort_values(by=['posto', 'STATUS', 'sequencia']).reset_index(drop=True)
 
     for posto_name, group in df.groupby("posto"):
+        group = group.copy()
+        
+        # --- LÓGICA DE SEQUÊNCIA CORRIGIDA ---
+        # Identificamos quem é Status 2 (Produção) e Status 3 (Crítico Extra)
+        mask_producao = (group['STATUS'] == 2)
+        mask_extra = (group['STATUS'] == 3)
+        
+        # Atribuímos Sequência 0 para tudo que for Status 3
+        group.loc[mask_extra, 'sequencia'] = 0
+        
+        # Atribuímos nova numeração sequencial (1, 2, 3...) APENAS para o Status 2
+        # O sum() da máscara nos dá a quantidade de itens que precisam de numeração
+        group.loc[mask_producao, 'sequencia'] = range(1, mask_producao.sum() + 1)
+        # -------------------------------------
+
+        # Criar a linha de cabeçalho (Header) para o posto
         header_row = {
             "Material": f"{group['turno'].iloc[0]}° TURNO - {data1_str}",
             "posto": posto_name,
             "tags": f"PONT. {str(posto_name)[-2:]}",
             "data": today,
             "linha": int(linha_str),
-            "STATUS": 2
+            "STATUS": 2,
+            "sequencia": 0 # Cabeçalho sempre sequência 0
         }
+        
         lista_de_dfs.append(pd.DataFrame([header_row]))
         lista_de_dfs.append(group)
 

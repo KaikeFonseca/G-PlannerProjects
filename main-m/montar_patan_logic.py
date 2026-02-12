@@ -66,7 +66,7 @@ def montar_patan(letra_patan, linha, turno, excel_path):
 
         # Regra para a prdoução
         if (total_livre+lote_patan) > estoque_kanban_max: #SE VERDADE, PRODUZ PATAN
-            print(lote_patan)
+            #print(lote_patan)
             #ou
             qtd_caixas_atual = qtd_caixas_original #Desta forma, qtd de kanban é igual a do PATAN
         else:
@@ -152,7 +152,7 @@ def montar_patan(letra_patan, linha, turno, excel_path):
             'kanbans': kanbans,
             'tempPeca': row['tempPeca'], 
             'tempoProd': tempo_prod_atual,
-            'sequencia': "", 
+            'sequencia': 0, 
             'compComb': ''.join(comp_comb_output),
             'estoqueMaterial': total_livre,
             'estoqueKanbanMax': estoque_kanban_max,
