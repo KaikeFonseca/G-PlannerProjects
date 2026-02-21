@@ -221,12 +221,12 @@ def montar_patan(letra_patan, linha, turno, excel_path):
                 status_atual = group_df.iloc[i]["STATUS"]
                 idx = group_df.index[i]
 
-                # --- NOVA LÓGICA: SE FOR STATUS 3, NÃO CALCULA HORA ---
                 if status_atual == 3:
-                    group_df.loc[idx, "horaProdInicial"] = pd.NaT # Ou None
-                    group_df.loc[idx, "horaProdFinal"] = pd.NaT
+                    group_df.loc[idx, "horaProdInicial"] = pd.NaT
+                    group_df.at[idx, "horaProdFinal"] = pd.NaT
+                    group_df.at[idx, "sequencia"] = 0 
                     group_df.loc[idx, "descricaoRefeicao"] = "PEÇA CRÍTICA - AGUARDANDO PUXADA"
-                    continue # Pula para o próximo item sem afetar a linha do tempo
+                    continue
 
                 # --- LÓGICA PARA STATUS 2 (NORMAL) ---
                 tempo_prod_item = group_df.iloc[i]["tempoProd"]
